@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Mechvibes Legacy</title>
+    <title>Mechvibes Ada</title>
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
     <link rel="shortcut icon" type="image/png" href="./assets/icon.png" />
     <link rel="stylesheet" href="./assets/milligram.min.css" />
@@ -10,6 +10,12 @@
   </head>
 
   <body style="padding: 2rem; padding-bottom: 0;">
+    <button id="language-toggle" class="language-toggle" type="button" aria-label="Switch language" title="Switch language">
+      <span class="flag flag-cl" aria-hidden="true"><span class="flag-star">★</span></span>
+      <span class="flag-divider"></span>
+      <span class="flag flag-en" aria-hidden="true"></span>
+    </button>
+
     <div id="app-logo">
       <div id="logo">Loading...</div>
     </div>
@@ -17,10 +23,10 @@
     <div id="app-body" class="loading">
       <div style="position: relative;text-align: center;font-size: 12px;">
         <div id="mechvibes-muted" class="hidden alert" style="position:absolute;top:-36px;left:0;right:0;">
-          Mechvibes is currently muted.
+          <span data-i18n="mechvibesMuted">Mechvibes is currently muted.</span>
         </div>
         <div id="system-muted" class="hidden alert" style="position:absolute;top:-36px;left:0;right:0;">
-          Your system sounds are currently muted.
+          <span data-i18n="systemMuted">Your system sounds are currently muted.</span>
         </div>
       </div>
       <table style="display: table">
@@ -30,16 +36,16 @@
               <select id="pack-list" class="custom-input mb-0" style="width: 100%; margin-right: 10px"></select>
               <div style="display: flex; justify-content: space-between;">
                 <small>
-                  <a id="random-button" style="cursor: pointer">Set random sound</a>
+                  <a id="random-button" style="cursor: pointer" data-i18n="setRandomSound">Set random sound</a>
                 </small>
                 <small>
-                  <a href="https://mechvibes.com/sound-packs/" class="open-in-browser">More sounds...</a>
+                  <a href="https://mechvibes.com/sound-packs/" class="open-in-browser" data-i18n="moreSounds">More sounds...</a>
                 </small>
               </div>
             </td>
           </tr>
           <tr>
-            <td style="width: 50%;padding-top:0;padding-bottom: 0;">Volume <span id="volume-value-display" style="font-weight: bold"></span></td>
+            <td style="width: 50%;padding-top:0;padding-bottom: 0;"><span data-i18n="volume">Volume</span> <span id="volume-value-display" style="font-weight: bold"></span></td>
           </tr>
           <tr>
             <td colspan="2" style="padding-top:0;padding-bottom:0;">
@@ -53,10 +59,29 @@
             </td>
           </tr>
           <tr class="checkbox-group" id="tray_icon_toggle_group">
-            <td style="width: 50%">Show Tray Icon</td>
+            <td style="width: 50%" data-i18n="showTrayIcon">Show Tray Icon</td>
             <td style="width: 50%">
               <div style="display:grid;grid-template-columns: 1em auto;font-size: 2rem;justify-content:right;">
                 <input type="checkbox" class="checkbox mb-0" id="tray_icon_toggle" checked/>
+              </div>
+            </td>
+          </tr>
+          <tr class="checkbox-group" id="adaptive_volume_toggle_group">
+            <td style="width: 50%">
+              <span data-i18n="adaptiveVolume">Adaptive Volume</span>
+              <div id="adaptive_volume_status" style="font-size: 11px; color: #999; line-height: 1.2;"></div>
+            </td>
+            <td style="width: 50%">
+              <div style="display:grid;grid-template-columns: 1em auto;font-size: 2rem;justify-content:right;">
+                <input type="checkbox" class="checkbox mb-0" id="adaptive_volume_toggle"/>
+              </div>
+            </td>
+          </tr>
+          <tr class="checkbox-group" id="start_on_boot_toggle_group">
+            <td style="width: 50%" data-i18n="startWithWindows">Start with Windows</td>
+            <td style="width: 50%">
+              <div style="display:grid;grid-template-columns: 1em auto;font-size: 2rem;justify-content:right;">
+                <input type="checkbox" class="checkbox mb-0" id="start_on_boot_toggle"/>
               </div>
             </td>
           </tr>
@@ -65,28 +90,31 @@
       <div class="divider"></div>
       <div style="color: #666; font-size: 12px; text-align: center">
         <p>Made with ❤ by <a href="https://github.com/hainguyents13/mechvibes/" class="open-in-browser">hainguyents13</a></p>
+        <!-- <p>Modified with ❤ by <a href="https://github.com/EduCVergara/mechvibesAda/" class="open-in-browser">EduCVergara</a></p> -->
         <div style="display:flex;gap:1em;justify-content: center;">
-          <a href="https://mechvibes.com" class="open-in-browser">Home page</a>
+          <a href="https://mechvibes.com" class="open-in-browser" data-i18n="homePage">Home page</a>
           <span>|</span>
-          <a href="https://buymeacoff.ee/hainguyents13" class="open-in-browser">Buy me a coffee</a>
+          <a href="https://buymeacoff.ee/hainguyents13" class="open-in-browser" data-i18n="buyCoffee">Buy me a coffee</a>
+          <span>|</span>
+          <a href="https://ko-fi.com/azhem" class="open-in-browser" data-i18n="buyEduCoffee">Buy EduCVergara a Coffee</a>
           <!-- 
             Though access to the advanced window can be disabled by the server,
             it's important to remember that users can *always* disable remote debugging
             via the link in div#remote-in-use
           -->
           <span id="debug-options-seperator" class="hidden">|</span>
-          <a href="#" id="open-debug-options" class="hidden">Advanced</a>
+          <a href="#" id="open-debug-options" class="hidden" data-i18n="advanced">Advanced</a>
         </div>
         <p id="app-version" style="color: #999">-</p>
         <div style="position: relative;">
           <div id="update-available" class="hidden alert">
-            New version of Mechvibes is available (<span id="new-version">-</span>)
+            <span data-i18n="newVersionAvailable">New version of Mechvibes is available</span> (<span id="new-version">-</span>)
             <div style="margin-top: 5px">
-              <a href="https://mechvibes.com/download/" class="open-in-browser">Check it out</a>
+              <a href="https://mechvibes.com/download/" class="open-in-browser" data-i18n="checkItOut">Check it out</a>
             </div>
           </div>
           <div id="remote-in-use" class="hidden alert" style="position: absolute;top:-66px;left:0;right:0;padding:0;">
-            <a href="#" id="quick-disable-remote">Click here</a> to disable remote debugging.
+            <a href="#" id="quick-disable-remote" data-i18n="clickHere">Click here</a> <span data-i18n="disableRemoteDebugging">to disable remote debugging.</span>
           </div>
         </div>
       </div>

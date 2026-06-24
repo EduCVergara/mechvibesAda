@@ -1,9 +1,9 @@
 {
-  "name": "mechvibes",
-  "productName": "Mechvibes",
-  "version": "v2.3.5",
-  "description": "Play mechanical keyboard sounds as you type.",
-  "repository": "https://github.com/hainguyents13/mechvibes",
+  "name": "mechvibes-ada",
+  "productName": "Mechvibes Ada",
+  "version": "2.4.0",
+  "description": "Play mechanical keyboard sounds as you type, with adaptive volume and Latin American Spanish support.",
+  "repository": "https://github.com/EduCVergara/mechvibesAda",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -19,6 +19,12 @@
     "name": "Hai Nguyen",
     "email": "hainguyen.ts13@gmail.com"
   },
+  "contributors": [
+    {
+      "name": "EduCVergara",
+      "url": "https://github.com/EduCVergara"
+    }
+  ],
   "license": "MIT",
   "iohook": {
     "targets": [
@@ -40,6 +46,7 @@
       "include": "./build/installer.nsh"
     },
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",

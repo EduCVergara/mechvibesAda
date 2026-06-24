@@ -16,13 +16,13 @@ module.exports = remoteTransportFactory;
 
 function remoteTransportFactory(electronLog, defaultUrl) {
 	// NOTE: The IPC server requires an identifier to be set, otherwise logs will be rejected with a 403 error.
-	transport.client = { name: 'Mechvibes' };
+	transport.client = { name: 'Mechvibes Ada' };
 	transport.depth = 6;
 	transport.level = false;
 	transport.requestOptions = {
 		method: "LOG",
 		headers: {
-			'User-Agent': `Mechvibes/${app.getVersion()} (Electron/${process.versions.electron})`
+			'User-Agent': `MechvibesAda/${app.getVersion()} (Electron/${process.versions.electron})`
 		},
 	};
 	transport.url = defaultUrl;

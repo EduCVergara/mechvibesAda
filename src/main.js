@@ -4,6 +4,7 @@ const { getVolume, getMute } = require('easy-volume');
 const path = require('path');
 const os = require("os");
 const fs = require('fs-extra');
+const { execFile } = require('child_process');
 // NOTE: Do not update electron-log, as we have a custom transport override which may not be compatible with newer versions.
 const log = require("electron-log");
 const Store = require("electron-store");
@@ -21,7 +22,31 @@ const current_pack_store_id = 'mechvibes-pack';
 const mute = new StoreToggle("mechvibes-muted", false);
 const start_minimized = new StoreToggle("mechvibes-start-minimized", false);
 const active_volume = new StoreToggle("mechvibes-active-volume", true);
+const adaptive_volume = new StoreToggle("mechvibes-adaptive-volume", false);
 const storage_prompted = new StoreToggle("mechvibes-migrate-asked", false);
+const headphone_name_patterns = [
+  "headphone",
+  "headphones",
+  "headset",
+  "earbud",
+  "earbuds",
+  "earphone",
+  "earphones",
+  "auricular",
+  "auriculares",
+  "audifono",
+  "audifonos",
+  "cascos",
+  "cloud",
+  "airpods",
+  "buds"
+];
+const speaker_name_patterns = [
+  "speaker",
+  "speakers",
+  "altavoz",
+  "altavoces"
+];
 
 // Remote debugging defaults
 const IpcServer = require("./utils/ipc");
@@ -35,7 +60,7 @@ let debug = {
       hostname: os.hostname(), // Lunas-Macbook-Pro.local
       username: os.userInfo().username, // lunaalfien
       platform: os.platform(), // darwin
-      version: app.getVersion() // v2.3.5
+      version: app.getVersion()
     };
 
     if(this.identifier === undefined){
@@ -163,6 +188,11 @@ log.hooks.push((msg, {transportName}) => {
 // be closed automatically when the JavaScript object is garbage collected.
 var win = null;
 var tray = null;
+var startup_handler = null;
+var audio_output_state = {
+  headphonesConnected: false,
+  outputNames: []
+};
 global.app_version = app.getVersion();
 global.custom_dir = custom_dir;
 global.current_pack_store_id = current_pack_store_id;
@@ -170,12 +200,150 @@ global.debug_config_path = debugConfigFile;
 // create custom sound folder if not exists
 fs.ensureDirSync(custom_dir);
 
+function setStoreToggle(toggle, enabled){
+  if(enabled){
+    toggle.enable();
+  }else{
+    toggle.disable();
+  }
+}
+
+function normalizeAudioDeviceName(name){
+  return `${name || ""}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getOutputSearchText(output){
+  return normalizeAudioDeviceName([
+    output.name,
+    output.description,
+    output.interface,
+    output.enumerator,
+    output.container,
+    output.devicePath
+  ].filter((value) => !!value).join(" "));
+}
+
+function isVirtualHyperxOutput(output){
+  const text = getOutputSearchText(output);
+  return text.includes("ngenuity") || text.includes("hyperx virtual audio device");
+}
+
+function isPhysicalUsbOutput(output){
+  const text = getOutputSearchText(output);
+  return !isVirtualHyperxOutput(output) && text.includes("usb");
+}
+
+function isSpeakerNamedOutput(output){
+  const name = normalizeAudioDeviceName(output.name);
+  return speaker_name_patterns.some((pattern) => name.includes(pattern));
+}
+
+function isHeadphoneOutput(output, allOutputs){
+  const text = getOutputSearchText(output);
+  const hasDirectHeadphoneName = headphone_name_patterns.some((pattern) => text.includes(pattern));
+  if(hasDirectHeadphoneName && !isVirtualHyperxOutput(output)){
+    return true;
+  }
+
+  const hasHyperxVirtualOutput = allOutputs.some(isVirtualHyperxOutput);
+  return hasHyperxVirtualOutput && isPhysicalUsbOutput(output) && isSpeakerNamedOutput(output);
+}
+
+function getWindowsActiveAudioOutputs(){
+  return new Promise((resolve) => {
+    if(process.platform !== "win32"){
+      resolve([]);
+      return;
+    }
+
+    const script = `
+$base = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render'
+$items = @(Get-ChildItem -Path $base -ErrorAction SilentlyContinue | ForEach-Object {
+  $state = (Get-ItemProperty -Path $_.PSPath -Name DeviceState -ErrorAction SilentlyContinue).DeviceState
+  if ($state -eq 1) {
+    $props = Get-ItemProperty -Path ($_.PSPath + '\\Properties') -ErrorAction SilentlyContinue
+    $name = $props.'{a45c254e-df1c-4efd-8020-67d146a850e0},2'
+    if ($name) {
+      [PSCustomObject]@{
+        id = $_.PSChildName
+        name = $name
+        description = $props.'{a45c254e-df1c-4efd-8020-67d146a850e0},14'
+        interface = $props.'{b3f8fa53-0004-438e-9003-51a46e139bfc},6'
+        enumerator = $props.'{a45c254e-df1c-4efd-8020-67d146a850e0},24'
+        container = $props.'{b3f8fa53-0004-438e-9003-51a46e139bfc},26'
+        devicePath = $props.'{233164c8-1b2c-4c7d-bc68-b671687a2567},1'
+      }
+    }
+  }
+})
+$json = $items | ConvertTo-Json -Compress
+if ($null -eq $json) { '[]' } else { $json }
+`;
+
+    execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      windowsHide: true,
+      timeout: 5000
+    }, (err, stdout) => {
+      if(err){
+        log.warn(`Audio output check failed: ${err.message}`);
+        resolve([]);
+        return;
+      }
+
+      const output = `${stdout || ""}`.trim();
+      if(output === ""){
+        resolve([]);
+        return;
+      }
+
+      try{
+        const json = JSON.parse(output);
+        resolve(Array.isArray(json) ? json : [json]);
+      }catch(parseErr){
+        log.warn(`Audio output check returned invalid JSON: ${parseErr.message}`);
+        resolve([]);
+      }
+    });
+  });
+}
+
+function sendRuntimeOptions(){
+  if(win === null || win.isDestroyed()){
+    return;
+  }
+
+  if(startup_handler !== null){
+    win.webContents.send("start-on-boot-status", startup_handler.is_enabled);
+  }
+  win.webContents.send("adaptive-volume-toggle", adaptive_volume.is_enabled);
+  win.webContents.send("audio-output-update", audio_output_state);
+}
+
+async function updateAudioOutputState(){
+  const outputs = await getWindowsActiveAudioOutputs();
+  const outputNames = outputs.map((output) => output.name).filter((name) => !!name);
+  const nextState = {
+    headphonesConnected: outputs.some((output) => isHeadphoneOutput(output, outputs)),
+    outputNames
+  };
+
+  if(JSON.stringify(audio_output_state) !== JSON.stringify(nextState)){
+    audio_output_state = nextState;
+    if(win !== null && !win.isDestroyed()){
+      win.webContents.send("audio-output-update", audio_output_state);
+    }
+  }
+}
+
 function createWindow(show = false) {
   // Create the browser window.
   win = new BrowserWindow({
     name: "app", // used by logger to differentiate messages sent by different windows.
-    width: 400,
-    height: 600,
+    width: 460,
+    height: 680,
     backgroundThrottling: false,
     webSecurity: false,
     // resizable: false,
@@ -205,6 +373,7 @@ function createWindow(show = false) {
     }
     win.webContents.send("ava-toggle", active_volume.is_enabled);
     win.webContents.send("mechvibes-mute-status", mute.is_enabled);
+    sendRuntimeOptions();
   })
 
   // Emitted when the window is closed.
@@ -402,7 +571,7 @@ if (!gotTheLock) {
   app.on('ready', () => {
     log.silly("Ready event has fired.");
     app.setAsDefaultProtocolClient('mechvibes');
-    const startup_handler = new StartupHandler(app);
+    startup_handler = new StartupHandler(app);
 
     log.silly("Creating main window for the first time...");
     if(startup_handler.was_started_at_login && start_minimized.is_enabled){
@@ -418,6 +587,8 @@ if (!gotTheLock) {
     let volume = -1; // set to an out-of-bound value to force an update on first run
     let system_mute = false;
     let system_volume_error = false;
+    updateAudioOutputState();
+    let audio_output_check_interval = setInterval(updateAudioOutputState, 3000);
     let sys_check_interval = setInterval(() => {
       if(!mute.is_enabled){
         getVolume().then((v) => {
@@ -470,12 +641,12 @@ if (!gotTheLock) {
       tray = new Tray(SYSTRAY_ICON);
 
       // tray icon tooltip
-      tray.setToolTip('Mechvibes');
+      tray.setToolTip('Mechvibes Ada');
 
       // context menu when hover on tray icon
       const contextMenu = Menu.buildFromTemplate([
         {
-          label: 'Mechvibes',
+          label: 'Mechvibes Ada',
           click: function () {
             // show app on click
             if (process.platform === 'darwin') {
@@ -539,6 +710,7 @@ if (!gotTheLock) {
               checked: startup_handler.is_enabled,
               click: function () {
                 startup_handler.toggle();
+                sendRuntimeOptions();
               },
             },
             {
@@ -547,6 +719,15 @@ if (!gotTheLock) {
               checked: start_minimized.is_enabled,
               click: function () {
                 start_minimized.toggle();
+              },
+            },
+            {
+              label: 'Adaptive Volume',
+              type: 'checkbox',
+              checked: adaptive_volume.is_enabled,
+              click: function () {
+                adaptive_volume.toggle();
+                sendRuntimeOptions();
               },
             },
             {
@@ -566,6 +747,7 @@ if (!gotTheLock) {
             // stop system check interval, because it's an external program, and
             // it doesn't know how to handle shutdowns.
             clearInterval(sys_check_interval);
+            clearInterval(audio_output_check_interval);
             // quit
             app.isQuiting = true;
             app.quit();
@@ -618,6 +800,26 @@ if (!gotTheLock) {
       log.variables.sender = "main"; // reset sender
     })
 
+    ipcMain.on("request_runtime_options", () => {
+      sendRuntimeOptions();
+    })
+
+    ipcMain.on("set_adaptive_volume", (event, enabled) => {
+      setStoreToggle(adaptive_volume, enabled);
+      sendRuntimeOptions();
+    })
+
+    ipcMain.on("set_start_on_boot", (event, enabled) => {
+      if(startup_handler !== null){
+        if(enabled){
+          startup_handler.enable();
+        }else{
+          startup_handler.disable();
+        }
+      }
+      sendRuntimeOptions();
+    })
+
     ipcMain.on("open-debug-options", (event) => {
       createDebugWindow();
     })
@@ -666,7 +868,7 @@ if (!gotTheLock) {
         const response = dialog.showMessageBoxSync({
           type: 'question',
           buttons: ['Yes', 'Not right now', "Don't ask again"],
-          title: 'Mechvibes',
+          title: 'Mechvibes Ada',
           message: "Soundpacks have moved to a new location, do you want to migrate your old soundpacks to the new location? We'll only ask you this once.",
           defaultId: 0,
           cancelId: 1,

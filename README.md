@@ -1,88 +1,96 @@
-![image](https://github.com/user-attachments/assets/2437f93b-30b3-4a07-8527-f1b23dae7fd2)
+# Mechvibes Ada
 
+[Leer en español](README_ES.md)
 
-# MechvibesDX - The next version of Mechvibes
+Mechvibes Ada is a new community version of Mechvibes focused on comfort, accessibility, and daily use on Windows. It keeps the classic idea of playing mechanical keyboard sounds while you type, and adds quality-of-life features for users who switch between speakers, headphones, and multiple languages.
 
+This fork is based on the original [Mechvibes](https://github.com/hainguyents13/mechvibes) by [Hai Nguyen](https://github.com/hainguyents13). The original author is also building [MechvibesDX](https://github.com/hainguyents13/mechvibes-dx), a modern rewrite of Mechvibes.
 
-I've been working on **MechvibesDX** - a complete rewrite of Mechvibes with significant improvements to performance, compatibility, and user experience. You can check it out at the new repository: [mechvibes-dx](https://github.com/hainguyents13/mechvibes-dx)
+## What's New in Mechvibes Ada
 
-## What's happening
+- **Latin American Spanish support:** switch between English and Spanish from the language toggle in the top-right corner.
+- **Adaptive Volume:** when headphones or headset-style audio outputs are detected, Mechvibes Ada can cap its effective volume at 10 to avoid sudden loud keyboard sounds.
+- **Start with Windows:** enable the app to open automatically when Windows starts.
+- **Windows-friendly setup:** helper scripts are included so you can install dependencies, run the app, and build it using a local project environment.
+- **Updated branding:** app name, title, tray label, installer name, and update metadata now use Mechvibes Ada.
+- **Layout improvements:** the window and settings labels were adjusted so English and Spanish text fit more comfortably.
 
--   **Current repo**: Will become legacy once MechvibesDX is stable
--   **New repo**: [mechvibes-dx](https://github.com/hainguyents13/mechvibes-dx) - active development
--   **Future**: When MechvibesDX reaches v1.0, it will become the main Mechvibes
+## Classic Mechvibes Features
 
-## Major improvements in MechvibesDX
+- Play mechanical keyboard sounds while typing.
+- Choose from included sound packs.
+- Use random sounds for a more natural typing feel.
+- Create, edit, and share custom sound packs with the Mechvibes ecosystem.
+- Keep the app available in the tray while you work.
 
--   **Performance**: Completely rewritten audio engine for faster soundpack loading
--   **Audio Events**: Support for both keyboard (keydown/keyup) and mouse (button press/release) sounds with extended button support
--   **Size**: Significantly smaller application size with reduced memory footprint
--   **Settings**: Advanced settings page for fine-tuning audio, performance, and behavior options
--   **Compatibility**: Much better support for existing soundpacks from the community
--   **Soundpack Management**: Easy soundpack installation - import via modal or copy to folder and refresh, no app restart required
--   **Customization**: Modern UI design with extensive theming options, custom backgrounds, logo customization
--   **Organization**: Separate keyboard/mouse soundpack folders, better file
--   **Architecture**: Built with Rust and modern web technologies
+## Download
 
-## Try it out
+Download the latest Windows installer from the [Releases page](https://github.com/EduCVergara/mechvibesAda/releases/latest).
 
-Head over to [mechvibes-dx](https://github.com/hainguyents13/mechvibes-dx) to:
+After installing, open Mechvibes Ada and configure:
 
--   Download the latest build and test new features
--   Migrate your soundpacks easily with the new migration tools
--   Customize the interface with themes, backgrounds, and logo options
--   Report issues or suggest improvements
+1. Your preferred sound pack.
+2. The app volume.
+3. Adaptive Volume, if you switch between speakers and headphones.
+4. Start with Windows, if you want the app to launch automatically.
 
-I'm working towards a stable v1.0 release, and your feedback helps make MechvibesDX better. The migration process for existing soundpacks is much smoother now.
+## Build from Source on Windows
 
-**Check out MechvibesDX**: https://github.com/hainguyents13/mechvibes-dx
+The recommended Windows flow uses the scripts included in this repository. They keep Node and npm cache local to the project as much as possible.
 
-_This repository will remain available during the transition period._
+```powershell
+.\scripts\setup.ps1
+.\scripts\start.ps1
+```
 
+To build the Windows installer:
 
----
+```powershell
+.\scripts\build-win.ps1
+```
 
-# Mechvibes: A fun and practical way to bring your favorite keyboard sounds anywhere
+The generated installer is created in `dist`, for example:
 
-> Mechvibes started as a side project I created for myself. Like many mechanical keyboard lovers, I faced challenges when using my keyboard in quiet environments - whether it was late at night or in the office. The loud, satisfying clicks might be music to my ears, but not so much for my parents or coworkers! If you’re in the same boat, Mechvibes is here for you.
+```text
+dist\Mechvibes Ada Setup 2.4.0.exe
+```
 
-![Mechvibes screenshot](https://github.com/user-attachments/assets/f0340d8a-3e47-4117-a110-ce54575fc27c)
+You can also use the package scripts directly if your environment is already configured:
 
-## What Can You Do with Mechvibes?
-🎨 **Customize Your Sound Experience:** Add new keyboard sound sets by recording any sound you like. Follow a few simple steps, and you’re good to go!
+```powershell
+yarn build:win
+yarn build:mac
+yarn build:linux
+```
 
-🎵 **Enjoy Your Favorite Keyboard Sounds Anywhere:** Use your laptop keyboard or a non-mechanical keyboard at work, and still enjoy the sounds you love.
+If the build cannot overwrite files in `dist`, close any running copy of Mechvibes Ada or `win-unpacked` before building again.
 
-🌻 **Get Creative with Sound Packs:** With Mechvibes Editor, you can create brand-new sound packs, edit existing ones, or even share them with your friends.
+## Check Windows Startup Registration
 
-💪 **Versatile Applications:** Use it for anything you can imagine! Demo keyboard sounds for buyers, customize sounds for specific keys, or make your keyboard experience uniquely yours.
+If you enabled **Start with Windows** and want to verify the registry entry during development, run:
 
-> Mechvibes isn’t just an app, it’s a way to bring the joy of mechanical keyboards to every environment, without compromising on your surroundings.
+```powershell
+.\scripts\check-startup.ps1
+```
 
-## How to Get Started
-- Download the app from the [Releases page](https://github.com/hainguyents13/mechvibes/releases/latest)
-- Run it.
-- Enjoy!
+In a packaged install, Windows should register the installed `Mechvibes Ada.exe`. In development, the app may register Electron with the project path.
 
-## Compile from Source
-Prefer to build the app yourself? 
-Follow these steps:
-- Clone the repository from GitHub.
-- Run the appropriate build command for your system:
-  - For macOS: `yarn build:mac`
-  - For Windows: `yarn build:win`
-  - For Linux: `yarn build:linux`
+## Support
 
-That’s it, your app is ready to use!
+If Mechvibes Ada helps you, you can support the maintainer:
 
-## Have Feedback or Suggestions?
-We’d love to hear from you! 🤝 Got an idea or ran into an issue? Feel free to share. It’s always appreciated!
+- [Buy EduCVergara a Coffee](https://ko-fi.com/azhem)
 
-## Powered by an Amazing Community
-Mechvibes has grown far beyond its initial scope, thanks to the incredible support and contributions from the community. Many users have created and shared sound packs, offered ideas, and even contributed code to improve the app.
-A heartfelt thank you to everyone who has helped Mechvibes evolve - you’ve truly made this project special ❤️
+You can also support the original creator:
 
-### 🎖️ Contributors:
-<a href="https://github.com/hainguyents13/mechvibes/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=hainguyents13/mechvibes&anon=1" height="30" />
-</a>
+- [Buy Hai Nguyen a Coffee](https://buymeacoff.ee/hainguyents13)
+
+## Credits
+
+- Original Mechvibes: [Hai Nguyen](https://github.com/hainguyents13)
+- Mechvibes Ada fork and Spanish support: [EduCVergara](https://github.com/EduCVergara)
+- Community sound packs, testing, ideas, and contributions: the Mechvibes community
+
+## License
+
+Mechvibes Ada follows the original project's MIT license.

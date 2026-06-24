@@ -1,6 +1,9 @@
 node_modules
 out
 dist
+dist-nosign
 gist
 *.
 .DS_Store
+.tools/
+.npm-cache/

@@ -16,18 +16,83 @@ const { GetFileFromArchive } = require('./libs/soundpacks/file-manager');
 const MV_PACK_LSID = remote.getGlobal("current_pack_store_id");
 const MV_VOL_LSID = 'mechvibes-volume';
 const MV_TRAY_LSID = 'mechvibes-hidden';
+const MV_LANG_LSID = 'mechvibes-language';
+const ADAPTIVE_VOLUME_LIMIT = 10;
 
 const CUSTOM_PACKS_DIR = remote.getGlobal('custom_dir');
 const OFFICIAL_PACKS_DIR = path.join(__dirname, 'audio');
 const APP_VERSION = remote.getGlobal('app_version');
 
 let active_volume = true;
+let adaptive_volume = false;
 let system_volume = 50; // a default just incase the algorithm needs to run before the volume is set
 let is_system_muted = false;
+let headphones_connected = false;
+let audio_output_names = [];
 let current_pack = null;
 let current_key_down = null;
 const packs = [];
 const all_sound_files = {};
+const translations = {
+  en: {
+    loading: "Loading...",
+    failed: "Failed",
+    mechvibesMuted: "Mechvibes Ada is currently muted.",
+    systemMuted: "Your system sounds are currently muted.",
+    setRandomSound: "Set random sound",
+    moreSounds: "More sounds...",
+    volume: "Volume",
+    showTrayIcon: "Show Tray Icon",
+    adaptiveVolume: "Adaptive Volume",
+    startWithWindows: "Start with Windows",
+    madeWith: "Made with",
+    modifiedWith: "Modified with",
+    by: "by",
+    homePage: "Home page",
+    buyCoffee: "Buy me a coffee",
+    buyEduCoffee: "Buy EduCVergara a Coffee",
+    advanced: "Advanced",
+    newVersionAvailable: "New version of Mechvibes Ada is available",
+    checkItOut: "Check it out",
+    clickHere: "Click here",
+    disableRemoteDebugging: "to disable remote debugging.",
+    adaptiveHeadphones: `Headphones detected, capped at ${ADAPTIVE_VOLUME_LIMIT}`,
+    adaptiveOutput: "Output",
+    adaptiveWaiting: "Waiting for output device",
+    switchLanguage: "Switch language"
+  },
+  es: {
+    loading: "Cargando...",
+    failed: "Falló",
+    mechvibesMuted: "Mechvibes Ada está silenciado.",
+    systemMuted: "Los sonidos del sistema están silenciados.",
+    setRandomSound: "Sonido aleatorio",
+    moreSounds: "Más sonidos...",
+    volume: "Volumen",
+    showTrayIcon: "Mostrar en bandeja",
+    adaptiveVolume: "Volumen adaptativo",
+    startWithWindows: "Iniciar con Windows",
+    madeWith: "Hecho con",
+    modifiedWith: "Modificado con",
+    by: "por",
+    homePage: "Página principal",
+    buyCoffee: "Invítame un café",
+    buyEduCoffee: "Invita un café a EduCVergara",
+    advanced: "Avanzado",
+    newVersionAvailable: "Hay una nueva versión de Mechvibes Ada disponible",
+    checkItOut: "Ver descarga",
+    clickHere: "Haz clic aquí",
+    disableRemoteDebugging: "para desactivar la depuración remota.",
+    adaptiveHeadphones: `Audífonos detectados, limitado a ${ADAPTIVE_VOLUME_LIMIT}`,
+    adaptiveOutput: "Salida",
+    adaptiveWaiting: "Esperando salida de audio",
+    switchLanguage: "Cambiar idioma"
+  }
+};
+const saved_language = store.get(MV_LANG_LSID);
+let current_language = saved_language == "es" || saved_language == "en"
+  ? saved_language
+  : ((navigator.language || "").toLowerCase().startsWith("es") ? "es" : "en");
 
 const log = {
   silly(message){
@@ -53,6 +118,57 @@ function raise_log_message(level, message){
   ipcRenderer.send("electron-log", message, level);
 }
 
+function t(key){
+  return translations[current_language][key] || translations.en[key] || key;
+}
+
+function ensureFooterCreditI18n(){
+  const app_version = document.getElementById('app-version');
+  if(app_version === null || app_version.parentElement === null){
+    return;
+  }
+
+  const footer_credit = app_version.parentElement.querySelector('p');
+  if(footer_credit === null || footer_credit.querySelector('[data-i18n="madeWith"]') !== null){
+    return;
+  }
+
+  footer_credit.innerHTML = '<span data-i18n="madeWith">Made with</span> <span>❤</span> <span data-i18n="by">by</span> <a href="https://github.com/hainguyents13/mechvibes/" class="open-in-browser">hainguyents13</a>';
+  footer_credit.innerHTML += '<br><span data-i18n="modifiedWith">Modified with</span> <span>❤</span> <span data-i18n="by">by</span> <a href="https://github.com/EduCVergara/mechvibesAda/" class="open-in-browser">EduCVergara</a>';
+}
+
+function applyLanguage(){
+  ensureFooterCreditI18n();
+  document.documentElement.lang = current_language == "es" ? "es-CL" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    const key = element.getAttribute("data-i18n");
+    element.innerText = t(key);
+  });
+
+  const language_toggle = document.getElementById("language-toggle");
+  if(language_toggle !== null){
+    language_toggle.title = t("switchLanguage");
+    language_toggle.setAttribute("aria-label", t("switchLanguage"));
+    language_toggle.classList.toggle("lang-es", current_language == "es");
+    language_toggle.classList.toggle("lang-en", current_language == "en");
+  }
+}
+
+function getEffectiveVolume(volume){
+  let effectiveVolume = Number(volume) || 0;
+  const safeSystemVolume = Math.max(Number(system_volume) || 0, 1);
+
+  if(active_volume){
+    effectiveVolume = effectiveVolume * (100 / safeSystemVolume);
+  }
+
+  if(adaptive_volume && headphones_connected){
+    effectiveVolume = Math.min(effectiveVolume, ADAPTIVE_VOLUME_LIMIT);
+  }
+
+  return effectiveVolume;
+}
+
 function loadPack(packId = null){
   if(packId === null){
     Object.keys(packs).map((pid) => {
@@ -67,14 +183,14 @@ function loadPack(packId = null){
   const app_body = document.getElementById('app-body');
 
   log.info(`Loading ${packId}`)
-  app_logo.innerHTML = 'Loading...';
+  app_logo.innerHTML = t('loading');
   app_body.classList.add('loading');
   _loadPack(packId).then(() => {
     log.info("loaded");
-    app_logo.innerHTML = 'Mechvibes';
+    app_logo.innerHTML = 'Mechvibes Ada';
     app_body.classList.remove('loading');
   }).catch((e) => {
-    app_logo.innerHTML = 'Failed';
+    app_logo.innerHTML = t('failed');
     console.warn(e);
     log.warn(`Failed to load pack: ${e}`);
   });
@@ -310,6 +426,7 @@ function packsToOptions(packs, pack_list) {
     const mechvibes_muted = document.getElementById('mechvibes-muted');
     const system_muted = document.getElementById('system-muted');
     const new_version = document.getElementById('new-version');
+    const language_toggle = document.getElementById('language-toggle');
     const app_logo = document.getElementById('logo');
     const app_body = document.getElementById('app-body');
     const pack_list = document.getElementById('pack-list');
@@ -320,9 +437,15 @@ function packsToOptions(packs, pack_list) {
     const volume = document.getElementById('volume');
     const tray_icon_toggle = document.getElementById("tray_icon_toggle");
     const tray_icon_toggle_group = document.getElementById("tray_icon_toggle_group");
+    const adaptive_volume_toggle = document.getElementById("adaptive_volume_toggle");
+    const adaptive_volume_toggle_group = document.getElementById("adaptive_volume_toggle_group");
+    const adaptive_volume_status = document.getElementById("adaptive_volume_status");
+    const start_on_boot_toggle = document.getElementById("start_on_boot_toggle");
+    const start_on_boot_toggle_group = document.getElementById("start_on_boot_toggle_group");
 
     // init
-    app_logo.innerHTML = 'Loading...';
+    applyLanguage();
+    app_logo.innerHTML = t('loading');
 
     // set app version
     version.innerHTML = APP_VERSION;
@@ -334,10 +457,11 @@ function packsToOptions(packs, pack_list) {
     packsToOptions(packs, pack_list);
 
     // check for new version
-    fetch('https://api.github.com/repos/hainguyents13/mechvibes/releases/latest')
+    fetch('https://api.github.com/repos/EduCVergara/mechvibesAda/releases/latest')
       .then((res) => res.json())
       .then((json) => {
-        if (json.tag_name.localeCompare(APP_VERSION, undefined, { numeric: true }) === 1) {
+        const latest_version = json.tag_name ? json.tag_name.replace(/^v/i, '') : null;
+        if (latest_version && latest_version.localeCompare(APP_VERSION.replace(/^v/i, ''), undefined, { numeric: true }) === 1) {
           new_version.innerHTML = json.tag_name;
           update_available.classList.remove('hidden');
         }
@@ -347,7 +471,7 @@ function packsToOptions(packs, pack_list) {
     fetch("https://beta.mechvibes.com/debug/status/", {
       method: "GET",
       headers: {
-        "User-Agent": `Mechvibes/${APP_VERSION} (Electron/${process.versions.electron})`
+        "User-Agent": `MechvibesAda/${APP_VERSION} (Electron/${process.versions.electron})`
       }
     }).then(async (res) => {
       const body = await res.text();
@@ -388,20 +512,45 @@ function packsToOptions(packs, pack_list) {
     }
     initTray();
 
+    language_toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      current_language = current_language == "es" ? "en" : "es";
+      store.set(MV_LANG_LSID, current_language);
+      language_toggle.classList.add('pressed');
+      setTimeout(() => {
+        language_toggle.classList.remove('pressed');
+      }, 120);
+      applyLanguage();
+      displayVolume();
+    });
+
     // volume
     let displayVolume = () => {
       let primary = document.createElement('span');
       primary.innerText = `${volume.value}`;
       volume_value.innerHTML = `${primary.outerHTML}`;
-      if(active_volume){
+
+      const effectiveVolume = getEffectiveVolume(volume.value);
+      const roundedEffectiveVolume = Math.round(effectiveVolume);
+      if(roundedEffectiveVolume !== Number(volume.value)){
         let adjusted = document.createElement('span');
-        adjusted.innerText = `(${Math.round(volume.value * (100 / system_volume))})`;
+        adjusted.innerText = `(${roundedEffectiveVolume})`;
         adjusted.style.marginLeft = '1em';
         adjusted.style.fontSize = '12px';
         adjusted.style.fontWeight = 'normal';
         adjusted.style.opacity = '0.5';
 
         volume_value.appendChild(adjusted);
+      }
+
+      if(adaptive_volume_status !== null){
+        if(adaptive_volume && headphones_connected){
+          adaptive_volume_status.innerText = t('adaptiveHeadphones');
+        }else if(adaptive_volume){
+          adaptive_volume_status.innerText = audio_output_names.length > 0 ? `${t('adaptiveOutput')}: ${audio_output_names.join(', ')}` : t('adaptiveWaiting');
+        }else{
+          adaptive_volume_status.innerText = '';
+        }
       }
     }
     if (store.get(MV_VOL_LSID)) {
@@ -431,6 +580,20 @@ function packsToOptions(packs, pack_list) {
       store.set(MV_VOL_LSID, volume.value);
       displayVolume();
     });
+
+    adaptive_volume_toggle_group.onclick = function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      adaptive_volume_toggle.checked = !adaptive_volume_toggle.checked;
+      ipcRenderer.send("set_adaptive_volume", adaptive_volume_toggle.checked);
+    }
+
+    start_on_boot_toggle_group.onclick = function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      start_on_boot_toggle.checked = !start_on_boot_toggle.checked;
+      ipcRenderer.send("set_start_on_boot", start_on_boot_toggle.checked);
+    }
 
     // warn about debugging
     ipcRenderer.on("debug-in-use", (_event, enabled) => {
@@ -469,6 +632,24 @@ function packsToOptions(packs, pack_list) {
       active_volume = enabled;
       displayVolume();
     });
+
+    ipcRenderer.on("adaptive-volume-toggle", (_event, enabled) => {
+      adaptive_volume = enabled;
+      adaptive_volume_toggle.checked = enabled;
+      displayVolume();
+    });
+
+    ipcRenderer.on("start-on-boot-status", (_event, enabled) => {
+      start_on_boot_toggle.checked = enabled;
+    });
+
+    ipcRenderer.on("audio-output-update", (_event, state) => {
+      headphones_connected = !!state.headphonesConnected;
+      audio_output_names = state.outputNames || [];
+      displayVolume();
+    });
+
+    ipcRenderer.send("request_runtime_options");
 
     // store pressed state of multiple keys
     let pressed_keys = {};
@@ -549,21 +730,17 @@ function playSound(event, volume) {
     return;
   }
 
-  if(active_volume){
-    // dynamic volume adjustment
-    const adjustedVolume = volume * (100 / system_volume);
-    
-    if(!is_system_muted){
-      log.silly(`Volume: ${volume}`);
-      log.silly(`System Volume: ${system_volume}`);
-      log.silly(`Adjusted Volume: ${adjustedVolume}`);
-      log.silly(`Result Volume: ${adjustedVolume / 100}`);
-    }
-
-    Howler.masterGain.gain.setValueAtTime(Number(adjustedVolume / 100), Howler.ctx.currentTime);
-  }else{
-    Howler.masterGain.gain.setValueAtTime(Number(volume / 100), Howler.ctx.currentTime);
+  const effectiveVolume = getEffectiveVolume(volume);
+  if(!is_system_muted){
+    log.silly(`Volume: ${volume}`);
+    log.silly(`System Volume: ${system_volume}`);
+    log.silly(`Adaptive Volume: ${adaptive_volume}`);
+    log.silly(`Headphones Connected: ${headphones_connected}`);
+    log.silly(`Effective Volume: ${effectiveVolume}`);
+    log.silly(`Result Volume: ${effectiveVolume / 100}`);
   }
+
+  Howler.masterGain.gain.setValueAtTime(Number(effectiveVolume / 100), Howler.ctx.currentTime);
 
   if(current_pack.HandleEvent !== undefined){
     // if pack has custom play sound function, use it
