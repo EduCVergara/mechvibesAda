@@ -1,7 +1,12 @@
 const fs = require('fs');
+const path = require('path');
 const { shell, remote, ipcRenderer } = require('electron');
+const { resolveInside, validateFolderName } = require('./utils/safe-path');
 const BASE_URL = "https://www.mechvibes.com/sound-packs";
 const CUSTOM_PACKS_DIR = remote.getGlobal('custom_dir');
+const MAX_PACK_FILES = 500;
+const MAX_PACK_SIZE = 100 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 const errorTranslation = {
 	400: "INVREQ",
@@ -41,6 +46,12 @@ ipcRenderer.on("install-pack", (event, packId) => {
 	const askPrompt = document.getElementById("ask");
 
 	let installation;
+	if(typeof packId !== "string" || !/^[a-z0-9._-]+$/i.test(packId)){
+		lock = false;
+		logo.innerText = "Error (INVREQ)";
+		resizeWindow();
+		return;
+	}
 	const PACK_URL = `${BASE_URL}/${packId}/dist`;
 	
 	fetch(`${PACK_URL}/install.json`).then((response) => {
@@ -48,7 +59,28 @@ ipcRenderer.on("install-pack", (event, packId) => {
 		console.log(response.ok);
 		if(response.ok){
 			response.json().then((data) => {
-				installation = data;
+				try{
+					const folder = validateFolderName(data.folder);
+					if(!Array.isArray(data.files) || data.files.length === 0 || data.files.length > MAX_PACK_FILES){
+						throw new Error("Invalid file list");
+					}
+
+					const files = data.files.map((file) => {
+						resolveInside(path.join(CUSTOM_PACKS_DIR, folder), file);
+						return file;
+					});
+
+					if(new Set(files).size !== files.length){
+						throw new Error("Duplicate files");
+					}
+
+					installation = {...data, folder, files};
+				}catch(error){
+					lock = false;
+					logo.innerText = "Error (INVREQ)";
+					resizeWindow();
+					return;
+				}
 				logo.innerText = "Sound Pack";
 				packageNameHolder.innerText = data.name;
 				packageNameSection.style.display = "block";
@@ -68,7 +100,11 @@ ipcRenderer.on("install-pack", (event, packId) => {
 				logo.innerText = `Error (UNKNOWN)`;
 			}
 		}
-	})
+	}).catch(() => {
+		lock = false;
+		logo.innerText = "Error (SERVOFF)";
+		resizeWindow();
+	});
 
 	const yesBtn = document.getElementById("answer-yes");
 	const noBtn = document.getElementById("answer-no");
@@ -78,9 +114,9 @@ ipcRenderer.on("install-pack", (event, packId) => {
 		const progBar = document.getElementById("prog-bar");
 		askPrompt.style.display = "none";
 
-		const INSTALL_DIR = `${CUSTOM_PACKS_DIR}/${installation.folder}`;
+		const INSTALL_DIR = resolveInside(CUSTOM_PACKS_DIR, installation.folder);
 		if(!fs.existsSync(INSTALL_DIR)){
-			fs.mkdirSync(INSTALL_DIR);
+			fs.mkdirSync(INSTALL_DIR, { recursive: true });
 		}
 		
 		setTimeout(async () => {
@@ -88,24 +124,51 @@ ipcRenderer.on("install-pack", (event, packId) => {
 			resizeWindow();
 			let progress = 0;
 			let error = null;
-			for (const i in installation.files) {
-				const file = installation.files[i];
-				progStatus.innerText = `Downloading ${file}...`;
-				const request = await fetch(`${PACK_URL}/${file}`);
-				if(!request.ok){
-					error = {
-						status:request.status,
-						file:file
-					};
-					break;
-				}
-				const blob = await request.blob();
-				const arrayBuffer = await blob.arrayBuffer();
-				const buffer = Buffer.from(arrayBuffer);
-				fs.writeFileSync(`${INSTALL_DIR}/${file}`, buffer);
+			let downloadedSize = 0;
+			try{
+				for (const i in installation.files) {
+					const file = installation.files[i];
+					progStatus.innerText = `Downloading ${file}...`;
+					const fileUrl = file.split(/[\\/]/).map(encodeURIComponent).join("/");
+					const request = await fetch(`${PACK_URL}/${fileUrl}`);
+					if(!request.ok){
+						error = {
+							status:request.status,
+							file:file
+						};
+						break;
+					}
+					const declaredSize = Number(request.headers.get("content-length")) || 0;
+					if(declaredSize > MAX_FILE_SIZE || downloadedSize + declaredSize > MAX_PACK_SIZE){
+						error = {
+							status: 400,
+							file: file
+						};
+						break;
+					}
+					const blob = await request.blob();
+					const arrayBuffer = await blob.arrayBuffer();
+					const buffer = Buffer.from(arrayBuffer);
+					downloadedSize += buffer.length;
+					if(buffer.length > MAX_FILE_SIZE || downloadedSize > MAX_PACK_SIZE){
+						error = {
+							status: 400,
+							file: file
+						};
+						break;
+					}
+					const destination = resolveInside(INSTALL_DIR, file);
+					fs.mkdirSync(path.dirname(destination), { recursive: true });
+					fs.writeFileSync(destination, buffer);
 
-				progress = ((Number(i) + 1) / installation.files.length) * 100;
-				progBar.style.width = `${progress}%`;
+					progress = ((Number(i) + 1) / installation.files.length) * 100;
+					progBar.style.width = `${progress}%`;
+				}
+			}catch(downloadError){
+				error = {
+					status: 0,
+					file: "pack"
+				};
 			}
 
 			if(error !== null){

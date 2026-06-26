@@ -6,6 +6,7 @@
 const { Howl } = require('howler');
 const { keycodesRemap, keycodesFill } = require('../keycodes');
 const { GetSoundpackFile } = require('./file-manager');
+const SOUNDPACK_LOAD_TIMEOUT = 15000;
 
 class SoundpackConfig {
 	/**
@@ -62,7 +63,14 @@ class SoundpackConfig {
 	 */
 	LoadSounds(){
 		return new Promise((resolve, reject) => {
+			let settled = false;
+			let timeout = null;
 			let beforeReject = (e) => {
+				if(settled){
+					return;
+				}
+				settled = true;
+				clearTimeout(timeout);
 				// delete this.sound_data;
 				if(this.key_define_type == "single"){
 					if(this.audio){
@@ -79,9 +87,17 @@ class SoundpackConfig {
 				}
 				reject(e);
 			}
-			let timeout = setTimeout(() => {
+			const complete = () => {
+				if(settled){
+					return;
+				}
+				settled = true;
+				clearTimeout(timeout);
+				resolve();
+			}
+			timeout = setTimeout(() => {
 				beforeReject("The soundpack took too long to load.");
-			}, 3000);
+			}, SOUNDPACK_LOAD_TIMEOUT);
 
 			let wait = (audio) => {
 				return new Promise((res, rej) => {
@@ -105,9 +121,8 @@ class SoundpackConfig {
 
 				const audio = new Howl(sound_data);
 				wait(audio).then(() => {
-					clearTimeout(timeout);
 					this.audio = audio;
-					resolve();
+					complete();
 				}).catch((e) => {
 					beforeReject(e);
 				})
@@ -122,16 +137,17 @@ class SoundpackConfig {
 				});
 				this.audio = {};
 				sound_data = keycodesRemap(sound_data);
-				Object.keys(sound_data).map((kc) => {
+				const loadPromises = Object.keys(sound_data).map((kc) => {
 					const audio = new Howl(sound_data[kc]);
-					wait(audio).then(() => {
-						clearTimeout(timeout);
-						this.audio[kc] = audio;
-						resolve();
-					}).catch((e) => {
-						beforeReject(e);
-					})
-				})
+					this.audio[kc] = audio;
+					return wait(audio);
+				});
+
+				Promise.all(loadPromises).then(() => {
+					complete();
+				}).catch((e) => {
+					beforeReject(e);
+				});
 			}else{
 				beforeReject("Invalid key_define_type");
 			}
@@ -159,7 +175,6 @@ class SoundpackConfig {
 
 		if (play_type == 'single') {
 			sound.play(sound_id);
-			console.log(this.audio);
 		} else {
 			sound.play();
 		}
@@ -178,7 +193,6 @@ class SoundpackConfig {
 					this.audio[kc].unload();
 				});
 				delete this.audio;
-				console.log("unloaded");
 			}
 		}
 	}

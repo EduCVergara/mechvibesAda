@@ -52,7 +52,7 @@ To build the Windows installer:
 The generated installer is created in `dist`, for example:
 
 ```text
-dist\Mechvibes Ada Setup 2.4.0.exe
+dist\Mechvibes Ada Setup 2.4.1.exe
 ```
 
 You can also use the package scripts directly if your environment is already configured:

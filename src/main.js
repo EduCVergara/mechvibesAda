@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, Tray, Menu, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerMonitor } = require('electron');
 const { getVolume, getMute } = require('easy-volume');
 const path = require('path');
 const os = require("os");
@@ -13,6 +13,7 @@ const iohook = require('iohook');
 
 const StartupHandler = require('./utils/startup_handler');
 const StoreToggle = require('./utils/store_toggle');
+const { validateFolderName } = require('./utils/safe-path');
 
 const SYSTRAY_ICON = path.join(__dirname, '/assets/system-tray-icon.png');
 const user_dir = app.getPath("userData");
@@ -344,7 +345,6 @@ function createWindow(show = false) {
     name: "app", // used by logger to differentiate messages sent by different windows.
     width: 460,
     height: 680,
-    backgroundThrottling: false,
     webSecurity: false,
     // resizable: false,
     // fullscreenable: false,
@@ -353,6 +353,7 @@ function createWindow(show = false) {
       contextIsolation: false,
       nodeIntegration: true,
       enableRemoteModule: true,
+      backgroundThrottling: false,
     },
     show: false,
   });
@@ -587,6 +588,17 @@ if (!gotTheLock) {
     let volume = -1; // set to an out-of-bound value to force an update on first run
     let system_mute = false;
     let system_volume_error = false;
+
+    const wakeRuntime = () => {
+      if(win !== null && !win.isDestroyed()){
+        win.webContents.send("resume-runtime");
+      }
+      updateAudioOutputState();
+    };
+
+    powerMonitor.on("unlock-screen", wakeRuntime);
+    powerMonitor.on("resume", wakeRuntime);
+
     updateAudioOutputState();
     let audio_output_check_interval = setInterval(updateAudioOutputState, 3000);
     let sys_check_interval = setInterval(() => {
@@ -784,8 +796,6 @@ if (!gotTheLock) {
       }else if(!show && tray !== null){
         tray.destroy()
         tray = null;
-      }else if(!show && tray === null){
-        createTrayIcon();
       }
     })
 
@@ -840,6 +850,12 @@ if (!gotTheLock) {
       installer.setSize(300, size + diff, true);
     })
     ipcMain.on("installed", (event, packFolder) => {
+      try{
+        validateFolderName(packFolder);
+      }catch(error){
+        log.warn(`Rejected invalid sound pack folder: ${error.message}`);
+        return;
+      }
       log.silly(`Installed ${packFolder}`);
       store.set(current_pack_store_id, "custom-" + packFolder);
       win.reload();
@@ -852,13 +868,12 @@ if (!gotTheLock) {
 
     // prevent Electron app from interrupting macOS system shutdown
     if (process.platform == 'darwin') {
-      const { powerMonitor } = require('electron');
       powerMonitor.on('shutdown', () => {
         app.quit();
       });
     }
 
-    if(storage_prompted.is_enabled){
+    if(!storage_prompted.is_enabled){
       // check if old custom directory exists
       const home_dir = app.getPath('home');
       const old_custom_dir = path.join(home_dir, "/mechvibes_custom");
@@ -886,10 +901,13 @@ if (!gotTheLock) {
           log.silly("Removing old custom directory...");
           fs.removeSync(old_custom_dir);
           log.debug("Migration complete.");
+          storage_prompted.enable();
           win.reload();
         }else if(response === 2){
           storage_prompted.enable();
         }
+      }else{
+        storage_prompted.enable();
       }
     }
   });

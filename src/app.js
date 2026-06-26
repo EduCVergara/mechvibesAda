@@ -5,19 +5,24 @@
 // const gkm = require('gkm');
 const Store = require('electron-store');
 const store = new Store();
-const { Howl } = require('howler');
+const { Howl, Howler } = require('howler');
 const { shell, remote, ipcRenderer } = require('electron');
 const fs = require('fs');
 const glob = require('glob');
 const path = require('path');
 const { platform } = process;
 const { GetFileFromArchive } = require('./libs/soundpacks/file-manager');
+const { extractVersion, isNewerVersion } = require('./utils/version');
 
 const MV_PACK_LSID = remote.getGlobal("current_pack_store_id");
 const MV_VOL_LSID = 'mechvibes-volume';
 const MV_TRAY_LSID = 'mechvibes-hidden';
 const MV_LANG_LSID = 'mechvibes-language';
 const ADAPTIVE_VOLUME_LIMIT = 10;
+
+// Immediate feedback is more important than suspending the audio context for
+// this always-on typing utility. Windows may still suspend it while locked.
+Howler.autoSuspend = false;
 
 const CUSTOM_PACKS_DIR = remote.getGlobal('custom_dir');
 const OFFICIAL_PACKS_DIR = path.join(__dirname, 'audio');
@@ -460,9 +465,11 @@ function packsToOptions(packs, pack_list) {
     fetch('https://api.github.com/repos/EduCVergara/mechvibesAda/releases/latest')
       .then((res) => res.json())
       .then((json) => {
-        const latest_version = json.tag_name ? json.tag_name.replace(/^v/i, '') : null;
-        if (latest_version && latest_version.localeCompare(APP_VERSION.replace(/^v/i, ''), undefined, { numeric: true }) === 1) {
-          new_version.innerHTML = json.tag_name;
+        // This repository's first release uses "mechvibesAda" as its tag, so
+        // fall back to the release name when the tag does not contain a version.
+        const latest_version = extractVersion(json.tag_name, json.name);
+        if (latest_version && isNewerVersion(latest_version, APP_VERSION)) {
+          new_version.innerText = latest_version.join('.');
           update_available.classList.remove('hidden');
         }
       });
@@ -654,6 +661,20 @@ function packsToOptions(packs, pack_list) {
     // store pressed state of multiple keys
     let pressed_keys = {};
 
+    ipcRenderer.on("resume-runtime", async () => {
+      pressed_keys = {};
+      app_logo.classList.remove('pressed');
+
+      if(Howler.usingWebAudio && Howler.ctx && Howler.ctx.state !== "running"){
+        try{
+          await Howler.ctx.resume();
+          Howler.state = Howler.ctx.state;
+        }catch(error){
+          log.warn(`Failed to resume audio context: ${error}`);
+        }
+      }
+    });
+
     // if key released, clear current key
     ipcRenderer.on('keyup', (_, { keycode }) => {
       let holding = false;
@@ -731,21 +752,12 @@ function playSound(event, volume) {
   }
 
   const effectiveVolume = getEffectiveVolume(volume);
-  if(!is_system_muted){
-    log.silly(`Volume: ${volume}`);
-    log.silly(`System Volume: ${system_volume}`);
-    log.silly(`Adaptive Volume: ${adaptive_volume}`);
-    log.silly(`Headphones Connected: ${headphones_connected}`);
-    log.silly(`Effective Volume: ${effectiveVolume}`);
-    log.silly(`Result Volume: ${effectiveVolume / 100}`);
-  }
 
   Howler.masterGain.gain.setValueAtTime(Number(effectiveVolume / 100), Howler.ctx.currentTime);
 
   if(current_pack.HandleEvent !== undefined){
     // if pack has custom play sound function, use it
     current_pack.HandleEvent(event, volume);
-    log.info(`Playing sound for keycode: ${event.keycode} (${event.type})`);
     return;
   }else{
     log.warn("Pack version doesn't have a HandleEvent function");

@@ -1,7 +1,7 @@
 {
   "name": "mechvibes-ada",
   "productName": "Mechvibes Ada",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Play mechanical keyboard sounds as you type, with adaptive volume and Latin American Spanish support.",
   "repository": "https://github.com/EduCVergara/mechvibesAda",
   "main": "src/main.js",
@@ -40,6 +40,10 @@
     ]
   },
   "build": {
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

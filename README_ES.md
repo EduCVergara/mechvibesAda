@@ -52,7 +52,7 @@ Para crear el instalador de Windows:
 El instalador generado queda en `dist`, por ejemplo:
 
 ```text
-dist\Mechvibes Ada Setup 2.4.0.exe
+dist\Mechvibes Ada Setup 2.4.1.exe
 ```
 
 También puedes usar directamente los scripts del paquete si tu entorno ya está configurado:
