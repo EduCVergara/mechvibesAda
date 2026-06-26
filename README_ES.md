@@ -52,15 +52,15 @@ Para crear el instalador de Windows:
 El instalador generado queda en `dist`, por ejemplo:
 
 ```text
-dist\Mechvibes Ada Setup 2.4.1.exe
+dist\Mechvibes Ada Setup 2.5.0.exe
 ```
 
 También puedes usar directamente los scripts del paquete si tu entorno ya está configurado:
 
 ```powershell
-yarn build:win
-yarn build:mac
-yarn build:linux
+npm run build:win
+npm run build:mac
+npm run build:linux
 ```
 
 Si la compilación no puede sobrescribir archivos en `dist`, cierra cualquier copia abierta de Mechvibes Ada o de `win-unpacked` antes de volver a compilar.

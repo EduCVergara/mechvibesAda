@@ -3,18 +3,32 @@
 // All of the Node.js APIs are available in the preload process.
 // It has the same sandbox as a Chrome extension.
 // const gkm = require('gkm');
-const Store = require('electron-store');
-const store = new Store();
 const { Howl, Howler } = require('howler');
-const { shell, remote, ipcRenderer } = require('electron');
+const { shell, ipcRenderer } = require('electron');
 const fs = require('fs');
-const glob = require('glob');
 const path = require('path');
 const { platform } = process;
 const { GetFileFromArchive } = require('./libs/soundpacks/file-manager');
 const { extractVersion, isNewerVersion } = require('./utils/version');
 
-const MV_PACK_LSID = remote.getGlobal("current_pack_store_id");
+const app_context = ipcRenderer.sendSync("get-app-context");
+if(app_context === null){
+  throw new Error("Unable to initialize trusted app context");
+}
+const stored_settings = {...app_context.settings};
+const store = {
+  has(key) {
+    return Object.prototype.hasOwnProperty.call(stored_settings, key);
+  },
+  get(key) {
+    return stored_settings[key];
+  },
+  set(key, value) {
+    stored_settings[key] = value;
+    ipcRenderer.send("set-renderer-setting", key, value);
+  }
+};
+const MV_PACK_LSID = app_context.currentPackStoreId;
 const MV_VOL_LSID = 'mechvibes-volume';
 const MV_TRAY_LSID = 'mechvibes-hidden';
 const MV_LANG_LSID = 'mechvibes-language';
@@ -24,9 +38,9 @@ const ADAPTIVE_VOLUME_LIMIT = 10;
 // this always-on typing utility. Windows may still suspend it while locked.
 Howler.autoSuspend = false;
 
-const CUSTOM_PACKS_DIR = remote.getGlobal('custom_dir');
+const CUSTOM_PACKS_DIR = app_context.customDir;
 const OFFICIAL_PACKS_DIR = path.join(__dirname, 'audio');
-const APP_VERSION = remote.getGlobal('app_version');
+const APP_VERSION = app_context.appVersion;
 
 let active_volume = true;
 let adaptive_volume = false;
@@ -121,6 +135,17 @@ const log = {
 }
 function raise_log_message(level, message){
   ipcRenderer.send("electron-log", message, level);
+}
+
+function openExternalUrl(url){
+  try{
+    const parsed = new URL(url);
+    if(parsed.protocol === "https:"){
+      shell.openExternal(parsed.toString());
+    }
+  }catch(error){
+    log.warn(`Rejected invalid external URL: ${url}`);
+  }
 }
 
 function t(key){
@@ -248,8 +273,11 @@ function unloadAllPacks(){
 // load all pack
 async function loadPacks() {
   // get all audio folders
-  const official_packs = await glob.sync(OFFICIAL_PACKS_DIR + '/*');
-  const custom_packs = await glob.sync(CUSTOM_PACKS_DIR + '/*');
+  const listPackPaths = (directory) => fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() || (entry.isFile() && path.extname(entry.name).toLowerCase() === ".zip"))
+    .map((entry) => path.join(directory, entry.name));
+  const official_packs = listPackPaths(OFFICIAL_PACKS_DIR);
+  const custom_packs = listPackPaths(CUSTOM_PACKS_DIR);
   const folders = [...official_packs, ...custom_packs];
 
   log.info(`Loading ${folders.length} packs`);
@@ -426,8 +454,6 @@ function packsToOptions(packs, pack_list) {
   window.addEventListener('DOMContentLoaded', async () => {
     const version = document.getElementById('app-version');
     const update_available = document.getElementById('update-available');
-    const debug_in_use = document.getElementById('remote-in-use');
-    const quick_disable_remote = document.getElementById('quick-disable-remote');
     const mechvibes_muted = document.getElementById('mechvibes-muted');
     const system_muted = document.getElementById('system-muted');
     const new_version = document.getElementById('new-version');
@@ -436,8 +462,6 @@ function packsToOptions(packs, pack_list) {
     const app_body = document.getElementById('app-body');
     const pack_list = document.getElementById('pack-list');
     const random_button = document.getElementById('random-button');
-    const debug_button = document.getElementById('open-debug-options');
-    const debug_button_seperator = document.getElementById('debug-options-seperator');
     const volume_value = document.getElementById('volume-value-display');
     const volume = document.getElementById('volume');
     const tray_icon_toggle = document.getElementById("tray_icon_toggle");
@@ -474,25 +498,11 @@ function packsToOptions(packs, pack_list) {
         }
       });
 
-    // check if remote debugging can be enabled by user
-    fetch("https://beta.mechvibes.com/debug/status/", {
-      method: "GET",
-      headers: {
-        "User-Agent": `MechvibesAda/${APP_VERSION} (Electron/${process.versions.electron})`
-      }
-    }).then(async (res) => {
-      const body = await res.text();
-      if(res.status == 200 && body == "enabled"){
-        debug_button.classList.remove("hidden");
-        debug_button_seperator.classList.remove("hidden");
-      }
-    });
-
     // a little hack for open link in browser
     Array.from(document.getElementsByClassName('open-in-browser')).forEach((elem) => {
       elem.addEventListener('click', (e) => {
         e.preventDefault();
-        shell.openExternal(e.target.href);
+        openExternalUrl(e.currentTarget.href);
       });
     });
 
@@ -601,15 +611,6 @@ function packsToOptions(packs, pack_list) {
       start_on_boot_toggle.checked = !start_on_boot_toggle.checked;
       ipcRenderer.send("set_start_on_boot", start_on_boot_toggle.checked);
     }
-
-    // warn about debugging
-    ipcRenderer.on("debug-in-use", (_event, enabled) => {
-      if(enabled){
-        debug_in_use.classList.remove("hidden");
-      }else{
-        debug_in_use.classList.add("hidden");
-      }
-    });
 
     ipcRenderer.on("system-volume-update", (_event, vol) => {
       system_volume = vol;
@@ -731,15 +732,6 @@ function packsToOptions(packs, pack_list) {
       setPackByIndex(packId);
     });
 
-    debug_button.addEventListener('click', (e) => {
-      e.preventDefault();
-      ipcRenderer.send("open-debug-options");
-    })
-
-    quick_disable_remote.addEventListener('click', (e) => {
-      e.preventDefault();
-      ipcRenderer.send("set-debug-options", { enabled: false });
-    });
   });
 })(window, document);
 

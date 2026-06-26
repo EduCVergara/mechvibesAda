@@ -1,30 +1,72 @@
 // Modules to control application life and create native browser window
 const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerMonitor } = require('electron');
-const { getVolume, getMute } = require('easy-volume');
 const path = require('path');
-const os = require("os");
 const fs = require('fs-extra');
 const { execFile } = require('child_process');
-// NOTE: Do not update electron-log, as we have a custom transport override which may not be compatible with newer versions.
-const log = require("electron-log");
-const Store = require("electron-store");
-const store = new Store();
-const iohook = require('iohook');
+const { fileURLToPath } = require('url');
+const log = require("electron-log/main");
+log.initialize();
+const { uIOhook } = require('uiohook-napi');
 
 const StartupHandler = require('./utils/startup_handler');
 const StoreToggle = require('./utils/store_toggle');
 const { validateFolderName } = require('./utils/safe-path');
+const JsonStore = require('./utils/json-store');
+
+const easyVolume = require('easy-volume');
+const windowsVolumeExecutable = path.join(
+  path.dirname(require.resolve('easy-volume')),
+  'platforms',
+  'windows',
+  'volume.exe'
+).replace('app.asar', 'app.asar.unpacked');
+
+function runWindowsVolumeCommand(command){
+  return new Promise((resolve, reject) => {
+    execFile(windowsVolumeExecutable, [command], {
+      windowsHide: true,
+      timeout: 3000
+    }, (error, stdout, stderr) => {
+      if(error || stderr){
+        reject(error || new Error(stderr));
+        return;
+      }
+      resolve(`${stdout}`.trim());
+    });
+  });
+}
+
+const getVolume = process.platform === 'win32'
+  ? async () => {
+      const value = Number(await runWindowsVolumeCommand('get'));
+      if(!Number.isFinite(value) || value < 0){
+        throw new Error('Unable to read system volume');
+      }
+      return value;
+    }
+  : easyVolume.getVolume;
+
+const getMute = process.platform === 'win32'
+  ? async () => (await runWindowsVolumeCommand('mute_status')) !== '0'
+  : easyVolume.getMute;
 
 const SYSTRAY_ICON = path.join(__dirname, '/assets/system-tray-icon.png');
 const user_dir = app.getPath("userData");
 const custom_dir = path.join(user_dir, '/custom');
 const current_pack_store_id = 'mechvibes-pack';
+const renderer_setting_keys = [
+  current_pack_store_id,
+  'mechvibes-volume',
+  'mechvibes-hidden',
+  'mechvibes-language'
+];
+const store = new JsonStore(path.join(user_dir, 'config.json'));
 
-const mute = new StoreToggle("mechvibes-muted", false);
-const start_minimized = new StoreToggle("mechvibes-start-minimized", false);
-const active_volume = new StoreToggle("mechvibes-active-volume", true);
-const adaptive_volume = new StoreToggle("mechvibes-adaptive-volume", false);
-const storage_prompted = new StoreToggle("mechvibes-migrate-asked", false);
+const mute = new StoreToggle(store, "mechvibes-muted", false);
+const start_minimized = new StoreToggle(store, "mechvibes-start-minimized", false);
+const active_volume = new StoreToggle(store, "mechvibes-active-volume", true);
+const adaptive_volume = new StoreToggle(store, "mechvibes-adaptive-volume", false);
+const storage_prompted = new StoreToggle(store, "mechvibes-migrate-asked", false);
 const headphone_name_patterns = [
   "headphone",
   "headphones",
@@ -49,112 +91,6 @@ const speaker_name_patterns = [
   "altavoces"
 ];
 
-// Remote debugging defaults
-const IpcServer = require("./utils/ipc");
-let debug = {
-  enabled: false, // the user must enable remote debugging via the debug options window
-  identifier: undefined, // the ipc server should be configured to provide unique identifiers for live debugging sessions
-  remoteUrl: "https://beta.mechvibes.com/debug/ipc/",
-  async enable() {
-    this.enabled = true;
-    const userInfo = {
-      hostname: os.hostname(), // Lunas-Macbook-Pro.local
-      username: os.userInfo().username, // lunaalfien
-      platform: os.platform(), // darwin
-      version: app.getVersion()
-    };
-
-    if(this.identifier === undefined){
-      const json = await IpcServer.identify(userInfo);
-      if(json.success){
-        this.identifier = json.identifier;
-        fs.writeJsonSync(debugConfigFile, {enabled: true, identifier: json.identifier});
-        log.transports.remote.client.identifier = this.identifier;
-        // TODO: set the level based on what the debugger wants
-        // We're going to set the level to silly for now, because we don't have a way to live-update the level,
-        // when the debugger changes the level, so we'll just set it to the most verbose level.
-        // But this should absolutely be changed, and soon because it is an unnecessary load on the server.
-        log.transports.remote.level = "silly";
-        // NOTE: Remote debugging will include a websocket connection in the future, but it wasn't implemented
-        // yet due to weird issues with the version of electron we use, and the version of node it uses,
-        // causing an SSL error saying that the certificate was expired when it wasn't.
-        // TODO: Check if the electron update fixed the above mentioned issue.
-        const options = {
-          enabled: debug.enabled,
-          level: log.transports.remote.level,
-          identifier: debug.identifier
-        };
-        if(debugWindow !== null){
-          debugWindow.webContents.send("debug-update", options);
-        }
-      }else{
-        this.enabled = false;
-        console.log(json);
-      }
-    }else{
-      // TODO: set the level based on what the debugger wants
-      console.log("enabling early");
-      log.transports.remote.client.identifier = this.identifier;
-      log.transports.remote.level = "silly";
-      const json = await IpcServer.validate(this.identifier, userInfo);
-      if(!json.success){
-        console.log("Failed validation");
-        log.transports.remote.level = false;
-        this.enabled = false;
-        this.identifier = undefined;
-        fs.unlinkSync(debugConfigFile);
-      }
-    }
-    if(win !== null){
-      win.webContents.send("debug-in-use", true);
-    }
-  },
-  disable() {
-    this.enabled = false;
-    this.identifier = undefined; // clear identifier, for user privacy
-    log.transports.remote.level = false;
-    log.transports.remote.client.identifier = undefined;
-    fs.unlinkSync(debugConfigFile);
-    // send a request to the ipc server to remove the user's information immediately.
-    // NOTE: if the ipc server fails to process the delete request, user logs might not be removed,
-    // depending on ipc server implementation. For this reason, users should only use the official ipc server,
-    // which is bound by the debug data retention policy.
-    // https://beta.mechvibes.com/blog/debug-data-retention-policy/
-    // transport.clear();
-
-    if(win !== null){
-      win.webContents.send("debug-in-use", false);
-    }
-  }
-}
-IpcServer.setRemoteUrl(debug.remoteUrl);
-
-// Override the default remote logger, to use our own implementation.
-// TODO: you know what, just move everything inside this tbh.
-log.transports.remote = require("./libs/electron-log/transports/remote")(log, debug.remoteUrl);
-
-// fix so we can detect transport type from within transport hook (see log.hooks.push(...))
-for (const transportName in log.transports) {
-  log.transports[transportName].transportName = transportName;
-}
-
-// parse debugging options
-const debugConfigFile = path.join(user_dir, "/remote-debug.json");
-if(fs.existsSync(debugConfigFile)){
-  const json = require(debugConfigFile);
-  console.log(json);
-  if(json.identifier){
-    debug.identifier = json.identifier;
-    if(json.enabled){
-      debug.enable();
-      console.log("enabled?");
-    }
-  }else{
-    fs.unlinkSync(debugConfigFile);
-  }
-  // log.transports.remote.level = debug.level;
-}
-
 // Default log file paths
 // On Windows: %appdata%\Mechvibes\logs\mechvibes.log
 // On macOS: ~/Library/Logs/Mechvibes/mechvibes.log
@@ -162,26 +98,14 @@ if(fs.existsSync(debugConfigFile)){
 //           $XDG_CONFIG_HOME/Mechvibes/logs/mechvibes.log
 log.transports.file.fileName = "mechvibes.log";
 log.transports.file.level = "info";
-log.transports.file.resolvePath = (variables) => {
+log.transports.file.resolvePathFn = (variables) => {
   return path.join(variables.libraryDefaultDir, variables.fileName);
 }
 log.variables.sender = "main";
 // console.log(log.transports.console.format); // uncomment to see default formats in console
 // console.log(log.transports.file.format); // uncomment to see default formats in console
-log.transports.console.format = "%c{h}:{i}:{s}.{ms}%c {sender} › {text}"
+log.transports.console.format = "{h}:{i}:{s}.{ms} {sender} › {text}"
 log.transports.file.format = "[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}]({sender}) {text}"
-
-const LogTransportMap = { error: 'red', warn: 'yellow', info: 'cyan', debug: 'magenta', silly: 'green', default: 'unset' };
-log.hooks.push((msg, {transportName}) => {
-  if (transportName === 'console') {
-    // apply color, only to console transport
-    return {
-      ...msg,
-      data: [`color: ${LogTransportMap[msg.level]}`, 'color: unset', ...msg.data]
-    };
-  }
-  return msg;
-});
 
 // const custom_dir = path.join(user_dir, "/custom");
 
@@ -194,12 +118,52 @@ var audio_output_state = {
   headphonesConnected: false,
   outputNames: []
 };
-global.app_version = app.getVersion();
-global.custom_dir = custom_dir;
-global.current_pack_store_id = current_pack_store_id;
-global.debug_config_path = debugConfigFile;
 // create custom sound folder if not exists
 fs.ensureDirSync(custom_dir);
+
+function isTrustedLocalSender(event, allowedPages = []){
+  try{
+    const senderPath = fileURLToPath(event.senderFrame.url);
+    return path.dirname(senderPath) === __dirname && (
+      allowedPages.length === 0 || allowedPages.includes(path.basename(senderPath))
+    );
+  }catch{
+    return false;
+  }
+}
+
+ipcMain.on("get-app-context", (event) => {
+  if(!isTrustedLocalSender(event, ["app.html", "install.html", "editor.html"])){
+    event.returnValue = null;
+    return;
+  }
+  event.returnValue = {
+    appVersion: app.getVersion(),
+    customDir: custom_dir,
+    currentPackStoreId: current_pack_store_id,
+    settings: Object.fromEntries(renderer_setting_keys
+      .filter((key) => store.has(key))
+      .map((key) => [key, store.get(key)]))
+  };
+});
+
+ipcMain.on("set-renderer-setting", (event, key, value) => {
+  if(
+    !isTrustedLocalSender(event, ["app.html"]) ||
+    !renderer_setting_keys.includes(key) ||
+    !["string", "number", "boolean"].includes(typeof value)
+  ){
+    return;
+  }
+  store.set(key, value);
+});
+
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-navigate", (event) => {
+    event.preventDefault();
+  });
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
 
 function setStoreToggle(toggle, enabled){
   if(enabled){
@@ -343,16 +307,15 @@ function createWindow(show = false) {
   // Create the browser window.
   win = new BrowserWindow({
     name: "app", // used by logger to differentiate messages sent by different windows.
-    width: 460,
-    height: 680,
-    webSecurity: false,
+    width: 480,
+    height: 720,
     // resizable: false,
     // fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, 'app.js'),
-      contextIsolation: false,
-      nodeIntegration: true,
-      enableRemoteModule: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
       backgroundThrottling: false,
     },
     show: false,
@@ -369,9 +332,6 @@ function createWindow(show = false) {
   // win.webContents.openDevTools();
 
   win.webContents.on("did-finish-load", () => {
-    if(debug.enabled){
-      win.webContents.send("debug-in-use", true);
-    }
     win.webContents.send("ava-toggle", active_volume.is_enabled);
     win.webContents.send("mechvibes-mute-status", mute.is_enabled);
     sendRuntimeOptions();
@@ -418,13 +378,13 @@ function openInstallWindow(packId){
     width: 300,
     height: 200,
     useContentSize: false,
-    webSecurity: false,
     // resizable: false,
     // fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, 'install.js'),
-      contextIsolation: false,
-      nodeIntegration: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
     },
     show: false,
     parent: win,
@@ -453,70 +413,7 @@ function openInstallWindow(packId){
   });
 }
 
-let debugWindow = null;
-function createDebugWindow(){
-  // Create the browser window.
-  debugWindow = new BrowserWindow({
-    width: 350,
-    height: 500,
-    useContentSize: false,
-    webSecurity: false,
-    // resizable: false,
-    // fullscreenable: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'debug.js'),
-      contextIsolation: false,
-      nodeIntegration: true,
-    },
-    show: false,
-    parent: win,
-  });
-
-  // remove menu bar
-  debugWindow.removeMenu();
-
-  // and load the index.html of the app.
-  debugWindow.loadFile('./src/debug.html');
-
-  debugWindow.webContents.on("did-finish-load", () => {
-    const options = {
-      enabled: debug.enabled,
-      level: log.transports.remote.level,
-      identifier: debug.identifier
-    };
-    debugWindow.webContents.send("debug-options", options);
-  })
-
-  ipcMain.on("fetch-debug-options", () => {
-    const options = {...debug, path: debugConfigFile};
-    debugWindow.webContents.send("debug-options", options);
-  })
-
-  debugWindow.on("ready-to-show", () => {
-    debugWindow.show();
-  })
-
-  // Emitted when the window is closed.
-  debugWindow.on('closed', function () {
-    // Dereference the window object, usually you would store windows
-    // in an array if your app supports multi windows, this is the time
-    // when you should delete the corresponding element.
-    debugWindow = null;
-  });
-}
-
 const gotTheLock = app.requestSingleInstanceLock();
-app.on('second-instance', () => {
-  // Someone tried to run a second instance, we should focus our window.
-  if (win) {
-    if (process.platform === 'darwin') {
-      app.dock.show();
-    }
-    win.show();
-    win.focus();
-  }
-});
-
 const protocolCommands = {
   install(packId){
     if(installer === null){
@@ -582,7 +479,7 @@ if (!gotTheLock) {
     }
 
     if(!mute.is_enabled){
-      iohook.start();
+      uIOhook.start();
     }
 
     let volume = -1; // set to an out-of-bound value to force an update on first run
@@ -637,11 +534,11 @@ if (!gotTheLock) {
     // NOTE: we could go lower than 3 seconds, but the problem is, the system volume check is slow,
     // so it's not a good idea to spam the system with requests.
 
-    iohook.on('keydown', (event) => {
+    uIOhook.on('keydown', (event) => {
       win.webContents.send("keydown", event);
     });
 
-    iohook.on('keyup', (event) => {
+    uIOhook.on('keyup', (event) => {
       win.webContents.send("keyup", event);
     });
 
@@ -706,9 +603,9 @@ if (!gotTheLock) {
           click: function () {
             mute.toggle();
             if(!mute.is_enabled){
-              iohook.start();
+              uIOhook.start();
             }else{
-              iohook.stop();
+              uIOhook.stop();
             }
             win.webContents.send("mechvibes-mute-status", mute.is_enabled);
           },
@@ -800,13 +697,13 @@ if (!gotTheLock) {
     })
 
     ipcMain.on("electron-log", (event, message, level) => {
-      const window_options = event.sender.browserWindowOptions;
-      if(window_options.name !== undefined && typeof window_options.name == "string"){
-        log.variables.sender = window_options.name
-      }else{
-        log.variables.sender = "u/w"; // unknown window
+      const allowedLevels = new Set(["error", "warn", "info", "debug", "verbose", "silly"]);
+      if(!isTrustedLocalSender(event) || !allowedLevels.has(level)){
+        return;
       }
-      log[level](message);
+      const senderWindow = BrowserWindow.fromWebContents(event.sender);
+      log.variables.sender = senderWindow === win ? "app" : "window";
+      log[level](`${message}`.slice(0, 5000));
       log.variables.sender = "main"; // reset sender
     })
 
@@ -815,13 +712,19 @@ if (!gotTheLock) {
     })
 
     ipcMain.on("set_adaptive_volume", (event, enabled) => {
-      setStoreToggle(adaptive_volume, enabled);
+      if(!isTrustedLocalSender(event, ["app.html"])){
+        return;
+      }
+      setStoreToggle(adaptive_volume, enabled === true);
       sendRuntimeOptions();
     })
 
     ipcMain.on("set_start_on_boot", (event, enabled) => {
+      if(!isTrustedLocalSender(event, ["app.html"])){
+        return;
+      }
       if(startup_handler !== null){
-        if(enabled){
+        if(enabled === true){
           startup_handler.enable();
         }else{
           startup_handler.disable();
@@ -830,26 +733,25 @@ if (!gotTheLock) {
       sendRuntimeOptions();
     })
 
-    ipcMain.on("open-debug-options", (event) => {
-      createDebugWindow();
-    })
-
-    ipcMain.on("set-debug-options", (event, json) => {
-      if(json.enabled && !debug.enabled){
-        debug.enable();
-      }else if(!json.enabled && debug.enabled){
-        debug.disable();
-      }
-    })
-
     // allow the installer to set its size using the height of the body so that when content changes,
     // the installer can only be as big or as small as it needs to be.
     ipcMain.on("resize-installer", (event, size) => {
+      if(
+        !isTrustedLocalSender(event, ["install.html"]) ||
+        installer === null ||
+        !Number.isFinite(size)
+      ){
+        return;
+      }
+      size = Math.max(100, Math.min(Math.round(size), 700));
       const diff = installer.getSize()[1] - installer.getContentSize()[1];
       log.silly(`Installer requested ${size}, offset is ${diff}, so size is ${(size + diff)}`);
       installer.setSize(300, size + diff, true);
     })
     ipcMain.on("installed", (event, packFolder) => {
+      if(!isTrustedLocalSender(event, ["install.html"])){
+        return;
+      }
       try{
         validateFolderName(packFolder);
       }catch(error){
@@ -945,6 +847,11 @@ app.on('activate', function () {
 // ensure app gets unregistered
 function OnBeforeQuit(){
   log.silly("Shutting down...");
+  try{
+    uIOhook.stop();
+  }catch(error){
+    log.warn(`Failed to stop keyboard hook cleanly: ${error.message}`);
+  }
   app.removeAsDefaultProtocolClient("mechvibes");
 }
 app.on("before-quit", OnBeforeQuit);
@@ -952,7 +859,6 @@ app.on("before-quit", OnBeforeQuit);
 // always be sure that your application handles the 'quit' event in your main process
 app.on('quit', () => {
   log.silly("Goodbye.");
-  app.quit();
 });
 
 var editor_window = null;
@@ -972,8 +878,10 @@ function openEditorWindow() {
     // modal: true,
     // parent: win,
     webPreferences: {
-      // preload: path.join(__dirname, 'editor.js'),
-      nodeIntegration: true,
+      preload: path.join(__dirname, 'editor.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
     },
   });
 

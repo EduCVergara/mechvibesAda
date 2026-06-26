@@ -1,23 +1,21 @@
-const Store = require('electron-store');
-const store = new Store();
-
 class StorageToggle {
-  constructor(key, defaultVal) {
+  constructor(store, key, defaultVal) {
+    this.store = store;
     this.key = key;
     this.default = defaultVal;
   }
 
   get is_enabled() {
-    if(!store.has(this.key)) return this.default;
-    return store.get(this.key);
+    if(!this.store.has(this.key)) return this.default;
+    return this.store.get(this.key);
   }
 
   enable() {
-    store.set(this.key, true);
+    this.store.set(this.key, true);
   }
 
   disable() {
-    store.set(this.key, false);
+    this.store.set(this.key, false);
   }
 
   toggle() {

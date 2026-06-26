@@ -1,7 +1,7 @@
 {
   "name": "mechvibes-ada",
   "productName": "Mechvibes Ada",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "description": "Play mechanical keyboard sounds as you type, with adaptive volume and Latin American Spanish support.",
   "repository": "https://github.com/EduCVergara/mechvibesAda",
   "main": "src/main.js",
@@ -26,23 +26,14 @@
     }
   ],
   "license": "MIT",
-  "iohook": {
-    "targets": [
-      "electron-87"
-    ],
-    "platforms": [
-      "win32",
-      "darwin",
-      "linux"
-    ],
-    "arches": [
-      "x64"
-    ]
-  },
   "build": {
     "files": [
       "src/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/easy-volume/dist/platforms/windows/volume.exe",
+      "node_modules/uiohook-napi/**/*"
     ],
     "nsis": {
       "oneClick": false,
@@ -99,19 +90,16 @@
     }
   },
   "dependencies": {
-    "adm-zip": "^0.5.10",
-    "easy-volume": "^1.1.0",
-    "electron-fetch": "^1.9.1",
-    "electron-log": "^4.4.8",
-    "electron-store": "^6.0.0",
-    "fs-extra": "^9.0.1",
-    "glob": "^7.1.6",
+    "adm-zip": "^0.5.17",
+    "easy-volume": "^1.2.0",
+    "electron-log": "^5.4.4",
+    "fs-extra": "^11.3.5",
     "howler": "^2.2.4",
-    "iohook": "^0.9.3",
-    "mime-types": "^2.1.35"
+    "mime-types": "^3.0.2",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
-    "electron": "^12.2.3",
-    "electron-builder": "^24.13.3"
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
   }
 }

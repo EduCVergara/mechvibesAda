@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>Mechvibes Ada</title>
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
     <link rel="shortcut icon" type="image/png" href="./assets/icon.png" />
     <link rel="stylesheet" href="./assets/milligram.min.css" />
     <link rel="stylesheet" href="./assets/app.css" />
@@ -97,13 +97,6 @@
           <a href="https://buymeacoff.ee/hainguyents13" class="open-in-browser" data-i18n="buyCoffee">Buy me a coffee</a>
           <span>|</span>
           <a href="https://ko-fi.com/azhem" class="open-in-browser" data-i18n="buyEduCoffee">Buy EduCVergara a Coffee</a>
-          <!-- 
-            Though access to the advanced window can be disabled by the server,
-            it's important to remember that users can *always* disable remote debugging
-            via the link in div#remote-in-use
-          -->
-          <span id="debug-options-seperator" class="hidden">|</span>
-          <a href="#" id="open-debug-options" class="hidden" data-i18n="advanced">Advanced</a>
         </div>
         <p id="app-version" style="color: #999">-</p>
         <div style="position: relative;">
@@ -112,9 +105,6 @@
             <div style="margin-top: 5px">
               <a href="https://github.com/EduCVergara/mechvibesAda/releases/latest" class="open-in-browser" data-i18n="checkItOut">Check it out</a>
             </div>
-          </div>
-          <div id="remote-in-use" class="hidden alert" style="position: absolute;top:-66px;left:0;right:0;padding:0;">
-            <a href="#" id="quick-disable-remote" data-i18n="clickHere">Click here</a> <span data-i18n="disableRemoteDebugging">to disable remote debugging.</span>
           </div>
         </div>
       </div>

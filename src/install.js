@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { shell, remote, ipcRenderer } = require('electron');
+const { ipcRenderer } = require('electron');
 const { resolveInside, validateFolderName } = require('./utils/safe-path');
 const BASE_URL = "https://www.mechvibes.com/sound-packs";
-const CUSTOM_PACKS_DIR = remote.getGlobal('custom_dir');
+const CUSTOM_PACKS_DIR = ipcRenderer.sendSync("get-app-context").customDir;
 const MAX_PACK_FILES = 500;
 const MAX_PACK_SIZE = 100 * 1024 * 1024;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;

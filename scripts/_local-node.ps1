@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$NodeVersion = "14.21.3"
+$NodeVersion = "24.16.0"
 $NodeDirName = "node-v$NodeVersion-win-x64"
 $ToolsDir = Join-Path $ProjectRoot ".tools"
 $NodeDir = Join-Path $ToolsDir $NodeDirName

@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { shell } = require('electron');
+const { shell, ipcRenderer } = require('electron');
 
 const remapper = require('./utils/remapper');
 const layouts = require('./libs/layouts');
@@ -12,7 +12,18 @@ const $ = require('./assets/jquery');
 const layout = layouts[process.platform];
 const { sizes } = layouts;
 const os_keycode = keycodes[process.platform];
-const CUSTOM_PACKS_DIR = path.join(__dirname, '../../../custom');
+const CUSTOM_PACKS_DIR = ipcRenderer.sendSync("get-app-context").customDir;
+
+function openExternalUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:') {
+      shell.openExternal(parsed.toString());
+    }
+  } catch {
+    // Ignore malformed links from imported content.
+  }
+}
 
 let selected_keycode = null;
 let current_edit_mode = 'visual';
@@ -36,7 +47,7 @@ Object.keys(pack_data.defines).map(kc => {
     Array.from(document.getElementsByClassName('open-in-browser')).forEach(elem => {
       elem.addEventListener('click', e => {
         e.preventDefault();
-        shell.openExternal(e.target.href);
+        openExternalUrl(e.currentTarget.href);
       });
     });
 
@@ -255,7 +266,7 @@ Object.keys(pack_data.defines).map(kc => {
     const container = $('#result');
     pack_data.defines = remapper(process.platform, 'standard', pack_data.defines);
     const result = JSON.stringify(pack_data, null, 2);
-    container.html(result);
+    container.text(result);
   }
 
   // ======================================
